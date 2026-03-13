@@ -143,6 +143,64 @@ def plot_feature_top20(
     plt.close(fig)
 
 
+def plot_cell_heatmap(
+    feature_id: int,
+    feature_acts: np.ndarray,
+    labels: np.ndarray,
+    output_dir: str,
+):
+    """
+    Plot mean activation across all 27 cells as three 2D heatmaps.
+
+    Layout: one heatmap per noise level, axes = freq (x) vs trend (y).
+    This reveals whether a feature is axis-aligned, conjunction, or polysemantic.
+
+    Saves to output_dir/feature_<N>_heatmap.png.
+    """
+    acts = feature_acts[:, feature_id]
+    n_freq = len(CFG.freqs)
+    n_trend = len(CFG.trends)
+    n_noise = len(CFG.noises)
+
+    # Build [n_freq, n_trend, n_noise] mean-activation grid
+    grid = np.zeros((n_freq, n_trend, n_noise))
+    for fi in range(n_freq):
+        for ti in range(n_trend):
+            for ni in range(n_noise):
+                mask = (
+                    (labels[:, 0] == fi) &
+                    (labels[:, 1] == ti) &
+                    (labels[:, 2] == ni)
+                )
+                grid[fi, ti, ni] = acts[mask].mean() if mask.any() else 0.0
+
+    vmax = grid.max()
+
+    fig, axes = plt.subplots(1, n_noise, figsize=(5 * n_noise, 4))
+    fig.suptitle(f"Feature {feature_id} — mean activation per cell", fontsize=13)
+
+    for ni, ax in enumerate(axes):
+        im = ax.imshow(
+            grid[:, :, ni].T,   # [trend, freq] for natural orientation
+            aspect="auto",
+            vmin=0, vmax=vmax,
+            cmap="viridis",
+        )
+        ax.set_title(f"noise σ={CFG.noises[ni]}", fontsize=9)
+        ax.set_xlabel("freq", fontsize=8)
+        ax.set_ylabel("trend", fontsize=8)
+        ax.set_xticks(range(n_freq))
+        ax.set_xticklabels([str(v) for v in CFG.freqs], fontsize=7)
+        ax.set_yticks(range(n_trend))
+        ax.set_yticklabels([str(v) for v in CFG.trends], fontsize=7)
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    plt.tight_layout()
+    out_path = os.path.join(output_dir, f"feature_{feature_id:04d}_heatmap.png")
+    plt.savefig(out_path, dpi=80)
+    plt.close(fig)
+
+
 def plot_summary_dashboard(
     feature_acts: np.ndarray,
     labels: np.ndarray,
@@ -219,10 +277,11 @@ def main():
     peak_acts = feature_acts.max(axis=0)   # [n_features]
     top50_ids = np.argsort(peak_acts)[::-1][:50].tolist()
 
-    # Per-feature top-20 plots (incremental saves)
-    print(f"Plotting top-20 series for {len(top50_ids)} features...")
+    # Per-feature top-20 plots and cell heatmaps (incremental saves)
+    print(f"Plotting top-20 series and cell heatmaps for {len(top50_ids)} features...")
     for fid in top50_ids:
         plot_feature_top20(fid, feature_acts, series, series_labels, CFG.output_dir)
+        plot_cell_heatmap(fid, feature_acts, series_labels, CFG.output_dir)
     print("Per-feature plots done.")
 
     # Summary dashboard for top-20 features
