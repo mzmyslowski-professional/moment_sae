@@ -93,6 +93,7 @@ def extract_activations(
     model = MOMENTPipeline.from_pretrained(
         "AutonLab/MOMENT-1-large",
         model_kwargs={"task_name": "reconstruction"},
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
     )
     model.init()
     model.to(device)
@@ -108,7 +109,7 @@ def extract_activations(
 
     def _hook_fn(module, input, output):
         # T5Block returns a tuple; first element is hidden states [B, n_patches, d_model]
-        hook_output["acts"] = output[0].detach().cpu().float()
+        hook_output["acts"] = output[0].detach().cpu().float()  # cast fp16→fp32
 
     # Validate hook path before registering
     assert hasattr(model, 'encoder') and hasattr(model.encoder, 'block'), \
