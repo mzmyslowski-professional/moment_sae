@@ -22,8 +22,8 @@ class Config:
     # SAE training
     batch_size: int = 2048
     lr: float = 3e-4
-    l1_start: float = 1e-4
-    l1_end: float = 4e-4
+    l1_start: float = 1e-3
+    l1_end: float = 4e-3
     l1_warmup_steps: int = 1000
     total_steps: int = 50000
     resample_every: int = 2500
