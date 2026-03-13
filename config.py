@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 class Config:
     # Model architecture
     d_model: int = 1024        # MOMENT-1-large hidden dim
-    n_features: int = 4096     # SAE width (4x expansion)
+    n_features: int = 1024     # SAE width (1x expansion)
     layer_idx: int = 18        # MOMENT encoder block to hook
 
     # MOMENT input
