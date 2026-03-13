@@ -103,7 +103,7 @@ def extract_activations(
         p.requires_grad_(False)
 
     # Register hook on encoder block 18
-    # Path: model.model.encoder.block[18]
+    # Path: model.encoder.block[18]  (MOMENTPipeline exposes encoder directly)
     hook_output = {}
 
     def _hook_fn(module, input, output):
@@ -111,13 +111,12 @@ def extract_activations(
         hook_output["acts"] = output[0].detach().cpu().float()
 
     # Validate hook path before registering
-    assert hasattr(model, 'model') and hasattr(model.model, 'encoder') and \
-           hasattr(model.model.encoder, 'block'), \
-           f"Hook path 'model.model.encoder.block' not found. " \
+    assert hasattr(model, 'encoder') and hasattr(model.encoder, 'block'), \
+           f"Hook path 'model.encoder.block' not found. " \
            f"Available model attrs: {list(model._modules.keys())}"
-    assert len(model.model.encoder.block) > CFG.layer_idx, \
-           f"layer_idx={CFG.layer_idx} out of range, encoder has {len(model.model.encoder.block)} blocks"
-    handle = model.model.encoder.block[CFG.layer_idx].register_forward_hook(_hook_fn)
+    assert len(model.encoder.block) > CFG.layer_idx, \
+           f"layer_idx={CFG.layer_idx} out of range, encoder has {len(model.encoder.block)} blocks"
+    handle = model.encoder.block[CFG.layer_idx].register_forward_hook(_hook_fn)
 
     all_acts = []
     n = len(series)
