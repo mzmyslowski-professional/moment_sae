@@ -10,7 +10,6 @@ import matplotlib
 matplotlib.use("Agg")  # non-interactive backend for Colab scripts
 import matplotlib.pyplot as plt
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 
 from config import CFG
 from sae import SparseAutoencoder
@@ -82,28 +81,32 @@ def get_series_level_acts(
     activations: torch.Tensor,
     n_patches: int,
     device: str,
-    batch_size: int = 4096,
+    series_batch: int = 64,
 ) -> np.ndarray:
     """
     Run all activations through SAE, return max activation per series per feature.
 
+    Processes `series_batch` series at a time to avoid materialising the full
+    [N*n_patches, n_features] intermediate array (~5 GB at default settings).
+
     Returns: float32 [n_series, n_features]
     """
     sae.eval()
-    all_z = []
-    loader = DataLoader(TensorDataset(activations), batch_size=batch_size)
+    n_total = activations.shape[0]   # N * n_patches
+    n_series = n_total // n_patches
+    series_max = []
 
     with torch.no_grad():
-        for (x,) in loader:
-            x = x.to(device)
-            z, _ = sae(x)
-            all_z.append(z.cpu().float().numpy())
+        for s_start in range(0, n_series, series_batch):
+            s_end = min(s_start + series_batch, n_series)
+            x = activations[s_start * n_patches : s_end * n_patches].to(device)
+            z, _ = sae(x)                                     # [(b*n_patches), n_features]
+            z = z.cpu().float()
+            b = s_end - s_start
+            z_max = z.reshape(b, n_patches, -1).max(dim=1).values  # [b, n_features]
+            series_max.append(z_max.numpy())
 
-    z_all = np.concatenate(all_z, axis=0)
-
-    n_series = z_all.shape[0] // n_patches
-    z_reshaped = z_all[: n_series * n_patches].reshape(n_series, n_patches, -1)
-    return z_reshaped.max(axis=1)   # [n_series, n_features]
+    return np.concatenate(series_max, axis=0)   # [n_series, n_features]
 
 
 def plot_feature_top20(
