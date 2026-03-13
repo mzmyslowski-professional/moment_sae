@@ -5,8 +5,32 @@ save activations and labels to data/.
 """
 import os
 import numpy as np
+import psutil
 import torch
 from config import CFG
+
+
+def _mem_stats(device: str, tag: str) -> None:
+    """Print CPU RAM and (if CUDA) GPU VRAM usage at a given checkpoint."""
+    proc = psutil.Process(os.getpid())
+    cpu_gb = proc.memory_info().rss / 1e9
+    sys_total_gb = psutil.virtual_memory().total / 1e9
+    sys_avail_gb = psutil.virtual_memory().available / 1e9
+    msg = (
+        f"[MEM {tag}] "
+        f"CPU RSS {cpu_gb:.2f} GB | "
+        f"sys avail {sys_avail_gb:.2f}/{sys_total_gb:.2f} GB"
+    )
+    if device == "cuda" and torch.cuda.is_available():
+        gpu_alloc = torch.cuda.memory_allocated() / 1e9
+        gpu_reserved = torch.cuda.memory_reserved() / 1e9
+        gpu_total = torch.cuda.get_device_properties(0).total_memory / 1e9
+        msg += (
+            f" | GPU alloc {gpu_alloc:.2f} GB"
+            f" / reserved {gpu_reserved:.2f} GB"
+            f" / total {gpu_total:.2f} GB"
+        )
+    print(msg)
 
 
 # Ground-truth axes (indices into CFG.freqs, CFG.trends, CFG.noises)
@@ -89,15 +113,18 @@ def extract_activations(
     """
     from momentfm import MOMENTPipeline
 
+    _mem_stats(device, "before model load")
     print("Loading MOMENT-1-large...")
     model = MOMENTPipeline.from_pretrained(
         "AutonLab/MOMENT-1-large",
         model_kwargs={"task_name": "reconstruction"},
         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
     )
+    _mem_stats(device, "after from_pretrained (CPU)")
     model.init()
     model.to(device)
     model.eval()
+    _mem_stats(device, "after model.to(device)")
 
     # Freeze all parameters
     for p in model.parameters():
@@ -142,8 +169,11 @@ def extract_activations(
         acts_flat = acts.reshape(-1, acts.shape[-1])  # [b*n_patches, d_model]
         all_acts.append(acts_flat.numpy())
 
-        if (start // extraction_batch) % 10 == 0:
-            print(f"  {end}/{n} series processed")
+        batch_idx = start // extraction_batch
+        if batch_idx % 10 == 0:
+            collected_gb = sum(a.nbytes for a in all_acts) / 1e9
+            print(f"  {end}/{n} series processed | collected {collected_gb:.2f} GB")
+            _mem_stats(device, f"batch {batch_idx}")
 
     handle.remove()
     return np.concatenate(all_acts, axis=0)   # [N*n_patches, d_model]
