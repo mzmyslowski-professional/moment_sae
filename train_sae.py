@@ -99,7 +99,7 @@ def train(device: str = None):
     start_step = 0
     ckpt_path = os.path.join(CFG.checkpoint_dir, "sae_state.pt")
     if os.path.exists(ckpt_path):
-        ckpt = torch.load(ckpt_path, map_location=device)
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         sae.load_state_dict(ckpt["model"])
         optimizer.load_state_dict(ckpt["optimizer"])
         start_step = ckpt["step"]
@@ -145,7 +145,16 @@ def train(device: str = None):
 
         # Dead feature resampling
         if step % CFG.resample_every == 0:
-            residuals = (x - x_rec).detach()
+            # Use a larger pool of residuals by sampling a fresh batch
+            with torch.no_grad():
+                try:
+                    (x_resample,) = next(data_iter)
+                except StopIteration:
+                    data_iter = iter(loader)
+                    (x_resample,) = next(data_iter)
+                x_resample = x_resample.to(device)
+                _, x_rec_resample = sae(x_resample)
+                residuals = (x_resample - x_rec_resample).detach()
             n_resampled = resample_dead_features(sae, fired_buffer, residuals)
             pct_dead = (~fired_buffer).float().mean().item() * 100
             print(f"[step {step}] Resampled {n_resampled} dead features "

@@ -182,7 +182,7 @@ def main():
     # Load SAE
     ckpt_path = os.path.join(CFG.checkpoint_dir, "sae_state.pt")
     sae = SparseAutoencoder(CFG.d_model, CFG.n_features).to(device)
-    ckpt = torch.load(ckpt_path, map_location=device)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     sae.load_state_dict(ckpt["model"])
     sae.eval()
     print(f"Loaded SAE from {ckpt_path} (step {ckpt['step']})")

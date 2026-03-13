@@ -110,6 +110,13 @@ def extract_activations(
         # T5Block returns a tuple; first element is hidden states [B, n_patches, d_model]
         hook_output["acts"] = output[0].detach().cpu().float()
 
+    # Validate hook path before registering
+    assert hasattr(model, 'model') and hasattr(model.model, 'encoder') and \
+           hasattr(model.model.encoder, 'block'), \
+           f"Hook path 'model.model.encoder.block' not found. " \
+           f"Available model attrs: {list(model._modules.keys())}"
+    assert len(model.model.encoder.block) > CFG.layer_idx, \
+           f"layer_idx={CFG.layer_idx} out of range, encoder has {len(model.model.encoder.block)} blocks"
     handle = model.model.encoder.block[CFG.layer_idx].register_forward_hook(_hook_fn)
 
     all_acts = []
@@ -127,6 +134,10 @@ def extract_activations(
 
         model(x_enc=x_enc, input_mask=mask)
 
+        if "acts" not in hook_output:
+            raise RuntimeError(
+                "Hook did not fire. Check that model.model.encoder.block[18] is the correct path."
+            )
         acts = hook_output["acts"]             # [b, n_patches, d_model]
         acts_flat = acts.reshape(-1, acts.shape[-1])  # [b*n_patches, d_model]
         all_acts.append(acts_flat.numpy())
