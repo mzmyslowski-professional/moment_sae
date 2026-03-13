@@ -69,3 +69,100 @@ def generate_dataset(
     series = np.stack(series_list)                    # [N, series_len]
     labels = np.array(labels_list, dtype=np.int8)     # [N, 3]
     return series, labels
+
+
+def extract_activations(
+    series: np.ndarray,
+    device: str = "cuda",
+    extraction_batch: int = 32,
+):
+    """
+    Run series through frozen MOMENT-1-large, capture layer 18 activations.
+
+    Args:
+        series: float32 [N, series_len]
+        device: torch device string
+        extraction_batch: number of series per MOMENT forward pass
+
+    Returns:
+        activations: float32 numpy [N * n_patches, d_model]
+    """
+    from momentfm import MOMENTPipeline
+
+    print("Loading MOMENT-1-large...")
+    model = MOMENTPipeline.from_pretrained(
+        "AutonLab/MOMENT-1-large",
+        model_kwargs={"task_name": "reconstruction"},
+    )
+    model.init()
+    model.to(device)
+    model.eval()
+
+    # Freeze all parameters
+    for p in model.parameters():
+        p.requires_grad_(False)
+
+    # Register hook on encoder block 18
+    # Path: model.model.encoder.block[18]
+    hook_output = {}
+
+    def _hook_fn(module, input, output):
+        # T5Block returns a tuple; first element is hidden states [B, n_patches, d_model]
+        hook_output["acts"] = output[0].detach().cpu().float()
+
+    handle = model.model.encoder.block[CFG.layer_idx].register_forward_hook(_hook_fn)
+
+    all_acts = []
+    n = len(series)
+
+    print(f"Extracting activations for {n} series (batch={extraction_batch})...")
+    for start in range(0, n, extraction_batch):
+        end = min(start + extraction_batch, n)
+        batch_np = series[start:end]           # [b, series_len]
+        b = len(batch_np)
+
+        # MOMENT expects [B, n_channels, seq_len]
+        x_enc = torch.tensor(batch_np).unsqueeze(1).to(device)  # [b, 1, series_len]
+        mask = torch.ones(b, CFG.series_len, device=device)
+
+        model(x_enc=x_enc, input_mask=mask)
+
+        acts = hook_output["acts"]             # [b, n_patches, d_model]
+        acts_flat = acts.reshape(-1, acts.shape[-1])  # [b*n_patches, d_model]
+        all_acts.append(acts_flat.numpy())
+
+        if (start // extraction_batch) % 10 == 0:
+            print(f"  {end}/{n} series processed")
+
+    handle.remove()
+    return np.concatenate(all_acts, axis=0)   # [N*n_patches, d_model]
+
+
+def main():
+    """Generate dataset, extract activations, save to data/."""
+    os.makedirs(CFG.data_dir, exist_ok=True)
+    acts_path = os.path.join(CFG.data_dir, "activations.npy")
+    labels_path = os.path.join(CFG.data_dir, "labels.npy")
+
+    print("Generating synthetic dataset...")
+    series, labels = generate_dataset()
+    print(f"  Series shape: {series.shape}")
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"  Device: {device}")
+
+    activations = extract_activations(series, device=device)
+    print(f"  Activations shape: {activations.shape}")
+
+    # Replicate labels 64x (one per patch per series)
+    labels_patch = np.repeat(labels, CFG.n_patches, axis=0)   # [N*n_patches, 3]
+    print(f"  Labels (patch-level) shape: {labels_patch.shape}")
+
+    np.save(acts_path, activations)
+    np.save(labels_path, labels_patch)
+    print(f"Saved activations → {acts_path}  ({activations.nbytes / 1e9:.2f} GB)")
+    print(f"Saved labels      → {labels_path}")
+
+
+if __name__ == "__main__":
+    main()
