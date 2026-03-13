@@ -1,0 +1,6 @@
+momentfm
+torch
+numpy
+matplotlib
+pandas
+pytest
